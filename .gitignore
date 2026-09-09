@@ -1,0 +1,42 @@
+# ===== 安全：API 密钥与配置 =====
+# config.yml 包含个人 API Key，禁止提交；请使用 config.example.yml 作为模板
+config.yml
+*.key
+.env
+
+# ===== Python 缓存 / 编译产物 =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# ===== 生成的数据 / 输出 =====
+# 下载的视频与生成的图片
+downloads/
+output/
+log/
+*.mp4
+*.png
+!assets/*.png
+*.html
+
+# ===== 二进制 / 运行时 =====
+# ffmpeg 体积大且非源码，不应随仓库分发
+ffmpeg.exe
+ffmpeg
+
+# ===== 缓存 / 临时文件 =====
+video_cache.json
+*.tmp
+*.swp
+.DS_Store
+Thumbs.db
+
+# ===== IDE / 编辑器 =====
+.idea/
+.vscode/
+
+# ===== 本地归档（重构时移出的废弃文件备份，不入库） =====
+archive/
