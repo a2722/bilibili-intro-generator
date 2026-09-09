@@ -44,7 +44,7 @@ DEFAULTS = {
     },
 }
 
-_TEMPLATE = """# ==================== bilibili-tool 统一配置 ====================
+_TEMPLATE = """# ==================== bilibili-intro-generator 统一配置 ====================
 # 使用说明：复制本文件为 config.yml 后填写（config.yml 已被 gitignore，不会泄露密钥）。
 # 三个分区均可只写需要覆盖的项，其余自动使用内置默认值。
 

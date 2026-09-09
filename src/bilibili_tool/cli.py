@@ -8,7 +8,7 @@ import sys
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="bili-tool",
+        prog="bili-intro-generator",
         description="B站工具箱：简介图生成 + 视频下载",
     )
     sub = parser.add_subparsers(dest="command", required=True)

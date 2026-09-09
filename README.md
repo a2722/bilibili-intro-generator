@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/intro_preview.png" alt="bilibili-tool 简介图效果预览" width="440">
+  <img src="assets/intro_preview.png" alt="bilibili-intro-generator 简介图效果预览" width="440">
 </p>
 
-# bilibili-tool
+# bilibili-intro-generator
 
 **B站简介图生成器** —— 一条命令，把视频 / 图文动态的封面、标题、数据、热门弹幕、热门评论渲染成一张精美的简介卡片图（PNG），直接可发动态、群聊分享。
 
@@ -33,7 +33,7 @@ python main.py download BV1jY8t6JE9K
 ## 目录结构
 
 ```
-bilibili-tool/
+bilibili-intro-generator/
 ├─ main.py                 # 唯一命令行入口
 ├─ pyproject.toml
 ├─ requirements.txt
@@ -73,7 +73,7 @@ python main.py intro https://www.bilibili.com/opus/1056353752004427792 --keep-ht
 python main.py download BV1GJ411x7h7
 ```
 
-安装为命令行工具后也可直接使用 `bili-tool` 命令（`pip install -e .`）。
+安装为命令行工具后也可直接使用 `bili-intro-generator` 命令（`pip install -e .`）。
 
 ## 配置
 
