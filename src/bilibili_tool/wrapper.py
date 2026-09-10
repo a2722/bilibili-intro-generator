@@ -7,13 +7,8 @@ bv_detector.py / organized_downloader.py，改为直接导入调用，
 """
 
 import sys
-import io
 import os
 from pathlib import Path
-
-if sys.stdout.encoding != 'utf-8':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 from .paths import PROJECT_ROOT
 

@@ -14,9 +14,9 @@ import os
 import time
 import json
 from datetime import datetime
-from typing import Dict, Tuple, Optional
+from typing import Dict, Optional
 from dataclasses import dataclass
-from .paths import PROJECT_ROOT
+from .paths import PROJECT_ROOT, normalize_bvid
 from .settings import CONFIG
 
 # 需要安装的库：bilibili-api-python
@@ -63,6 +63,12 @@ class VideoDetector:
         self.cache = self._load_cache()
         self.last_request_time = 0
         self.min_request_interval = self.config.get("min_request_interval", 1.0)  # 请求间隔（秒）
+        # 配置项语义为“最大尝试次数”，至少为 1；避免设为 0/负数时循环不执行导致 info 未赋值
+        try:
+            self.max_retries = max(1, int(self.config.get("max_retries", 1)))
+        except (TypeError, ValueError):
+            print(f"max_retries 配置无效，回退为 1: {self.config.get('max_retries')!r}")
+            self.max_retries = 1
         
     def _load_cache(self) -> dict:
         """加载缓存"""
@@ -88,10 +94,15 @@ class VideoDetector:
             for key in expired_keys:
                 del self.cache[key]
             
-            # 保存缓存
-            with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+            # 原子写入：先写临时文件并落盘，再重命名覆盖，
+            # 避免中途失败/断电时留下半截 JSON 导致缓存损坏
+            tmp_file = CACHE_FILE.with_name(CACHE_FILE.name + ".tmp")
+            with open(tmp_file, 'w', encoding='utf-8') as f:
                 json.dump(self.cache, f, indent=2, ensure_ascii=False)
-                
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_file, CACHE_FILE)
+
             if expired_keys:
                 print(f"清理了 {len(expired_keys)} 个过期缓存")
                 
@@ -109,7 +120,7 @@ class VideoDetector:
     async def get_video_info(self, bv_id: str) -> Optional[Dict]:
         """获取视频信息"""
         # 检查缓存
-        cache_key = f"BV{bv_id}" if not bv_id.startswith("BV") else bv_id
+        cache_key = normalize_bvid(bv_id)
         if cache_key in self.cache:
             cache_data = self.cache[cache_key]
             cache_time = datetime.fromisoformat(cache_data.get("timestamp", "1970-01-01")).timestamp()
@@ -121,11 +132,8 @@ class VideoDetector:
         # 应用速率限制
         await self._rate_limit()
         
-        # 处理BV号格式
-        if bv_id.startswith("BV"):
-            bv_full = bv_id
-        else:
-            bv_full = f"BV{bv_id}"
+        # 处理BV号格式（统一为规范的大写 BV 前缀）
+        bv_full = normalize_bvid(bv_id)
         
         try:
             print(f"正在获取视频信息: {bv_full}")
@@ -134,7 +142,7 @@ class VideoDetector:
             v = video.Video(bvid=bv_full)
             
             # 获取视频信息（带重试）
-            for retry in range(self.config["max_retries"]):
+            for retry in range(self.max_retries):
                 try:
                     info = await asyncio.wait_for(
                         v.get_info(), 
@@ -142,7 +150,7 @@ class VideoDetector:
                     )
                     break
                 except asyncio.TimeoutError:
-                    if retry == self.config["max_retries"] - 1:
+                    if retry == self.max_retries - 1:
                         raise
                     print(f"请求超时，第 {retry + 1} 次重试...")
                     await asyncio.sleep(1)
@@ -197,7 +205,7 @@ class VideoDetector:
     def calculate_difficulty(self, video_info: Dict) -> VideoDifficulty:
         """计算视频难度"""
         bv_full = video_info.get('bvid', '')
-        bv_id = bv_full[2:] if bv_full.startswith("BV") else bv_full
+        bv_id = normalize_bvid(bv_full)
         
         total_duration = video_info.get('total_duration', 0)
         part_count = video_info.get('part_count', 1)

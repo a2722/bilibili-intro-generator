@@ -17,6 +17,14 @@ from .paths import PROJECT_ROOT
 
 CONFIG_FILE = PROJECT_ROOT / "config.yml"
 
+# 历史模板 / 示例文件中的占位符，视为“未配置”，避免误触发 LLM 请求
+_API_KEY_PLACEHOLDERS = {
+    "在这里填入你的 DeepSeek API Key",
+    "在此填入你的 DeepSeek API Key",
+    "your api key",
+    "YOUR_API_KEY",
+}
+
 DEFAULTS = {
     "llm": {
         "provider": "deepseek",
@@ -40,7 +48,7 @@ DEFAULTS = {
         "cache_ttl": 86400,                  # 缓存有效期（秒）
         "min_request_interval": 2.0,         # 最小请求间隔（秒）
         "timeout": 15,                       # API 请求超时（秒）
-        "max_retries": 1,                    # 最大重试次数
+        "max_retries": 1,                    # 最大尝试次数（至少 1）
     },
 }
 
@@ -52,7 +60,7 @@ _TEMPLATE = """# ==================== bilibili-intro-generator 统一配置 ====
 # 不填 api_key 时跳过 AI 分类，简介图仍正常生成（弹幕使用关键词规则着色）。
 llm:
   provider: deepseek
-  api_key: "在这里填入你的 DeepSeek API Key"
+  api_key: ""  # 留空则跳过 AI 弹幕分类（简介图仍正常生成）
   base_url: "https://api.deepseek.com"
   model: "deepseek-chat"
 
@@ -84,7 +92,7 @@ detector:
   min_request_interval: 2.0
   # API 请求超时（秒）
   timeout: 15
-  # 最大重试次数
+  # 最大尝试次数（至少 1；1 表示只尝试一次、不重试）
   max_retries: 1
 """
 
@@ -120,6 +128,13 @@ def load_config() -> dict:
     for section in DEFAULTS:
         if isinstance(user_cfg.get(section), dict):
             merged[section] = _deep_merge(DEFAULTS[section], user_cfg[section])
+
+    # 占位符 / 纯空白一律视为未配置，避免误触发 LLM 请求
+    llm = merged.get("llm")
+    if isinstance(llm, dict):
+        key = (llm.get("api_key") or "").strip()
+        llm["api_key"] = "" if key in _API_KEY_PLACEHOLDERS else key
+
     return merged
 
 

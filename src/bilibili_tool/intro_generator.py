@@ -3,13 +3,13 @@
 B站视频简介图生成 — 主入口模块
 """
 
-import asyncio
 import html
 import os
 import shutil
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 try:
     from playwright.async_api import async_playwright
@@ -33,11 +33,16 @@ from .bili_config import (
     COMMENT_LIKE_SVG,
     COMMENT_TITLE_SVG,
 )
-from .data_fetcher import BiliIntroData, OpusIntroData, classify_danmaku_llm
+from .data_fetcher import BiliIntroData, OpusIntroData, classify_danmaku_llm, format_fetch_error
 from .paths import PROJECT_ROOT
 
 OUTPUT_DIR = PROJECT_ROOT / "output"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _esc(value) -> str:
+    """转义要插入 HTML 属性的内容（含引号），防止破坏标签结构。"""
+    return html.escape(str(value or ""), quote=True)
 
 
 def setup_output_directory() -> Path:
@@ -623,12 +628,12 @@ async def generate_html(data: BiliIntroData) -> str:
         </div>
         <div class="content">
             <div class="cover" style="position: relative;">
-                <img src="{cover_url}" alt="封面" onerror="this.style.display='none'">
+                <img src="{_esc(cover_url)}" alt="封面" onerror="this.style.display='none'">
                 {cover_stats_html}
             </div>
             <div class="up-info">
                 <div class="up-avatar">
-                    <img src="{avatar_url}" alt="头像" onerror="this.style.display='none'">
+                    <img src="{_esc(avatar_url)}" alt="头像" onerror="this.style.display='none'">
                 </div>
                 <div>
                     <div class="up-name">{up_name}</div>
@@ -668,7 +673,7 @@ def _render_opus_content(data: OpusIntroData) -> str:
             for s in p["segments"]:
                 if s["type"] == "emoji":
                     seg_html += (
-                        f'<img class="emoji-img" src="{s["url"]}" alt="" '
+                        f'<img class="emoji-img" src="{_esc(s["url"])}" alt="" '
                         f'onerror="this.style.display=\'none\'">'
                     )
                 else:
@@ -685,7 +690,7 @@ def _render_opus_content(data: OpusIntroData) -> str:
 
     if data.images:
         grid_cells = "".join(
-            f'<img src="{img["url"]}" loading="lazy" '
+            f'<img src="{_esc(img["url"])}" loading="lazy" '
             f'onerror="this.style.display=\'none\'">'
             for img in data.images
         )
@@ -748,7 +753,7 @@ async def _generate_opus_html(data: OpusIntroData) -> str:
         <div class="content">
             <div class="up-info">
                 <div class="up-avatar">
-                    <img src="{avatar_url}" alt="头像" onerror="this.style.display='none'">
+                    <img src="{_esc(avatar_url)}" alt="头像" onerror="this.style.display='none'">
                 </div>
                 <div>
                     <div class="up-name">{up_name}</div>
@@ -822,12 +827,13 @@ def _build_danmaku_items(data: BiliIntroData) -> list:
                 break
 
     for dm in unique_dms:
-        text = html.escape(get_text(dm))
+        raw_text = get_text(dm)
+        text = html.escape(raw_text)
         like = get_like(dm)
         color = dm_color_to_hex(get_color(dm))
         if color in ("#ffffff", "#FFFFFF", "#000000"):
             color = "#18191C"
-        danmaku_items.append({"text": text, "like": like, "color": color})
+        danmaku_items.append({"text": text, "raw": raw_text, "like": like, "color": color})
 
     return danmaku_items
 
@@ -847,7 +853,7 @@ def _replace_comment_emotes(message_raw: str, emote_map) -> str:
         if not url:
             continue
         img = (
-            f'<img src="{url}" alt="{html.escape(key)}" title="{html.escape(key)}" '
+            f'<img src="{_esc(url)}" alt="{html.escape(key)}" title="{html.escape(key)}" '
             f'style="width:36px;height:36px;vertical-align:-6px;display:inline-block;" '
             f'onerror="this.style.display=\'none\'">'
         )
@@ -905,7 +911,7 @@ async def _classify_danmaku(danmaku_items: list, title: str, desc: str) -> dict:
     if not LLM_CONFIG.get("api_key") or not danmaku_items:
         return {}
     try:
-        danmaku_texts = [dm["text"] for dm in danmaku_items]
+        danmaku_texts = [dm.get("raw", dm["text"]) for dm in danmaku_items]
         categories = await classify_danmaku_llm(danmaku_texts, title, desc)
         if categories:
             print(f"LLM 弹幕分类成功: {len(categories)} 条")
@@ -929,7 +935,7 @@ def _render_danmaku_section(danmaku_items: list, danmaku_categories: dict) -> st
     ]
 
     for i, dm in enumerate(danmaku_items):
-        cat = danmaku_categories.get(dm["text"])
+        cat = danmaku_categories.get(dm.get("raw", dm["text"]))
         if cat and cat in DANMAKU_CATEGORY_COLORS:
             bg, border = DANMAKU_CATEGORY_COLORS[cat]
         else:
@@ -960,7 +966,7 @@ def _render_comment_section(comments: list, show_label: bool = True) -> str:
         content_html = c["content"]
         if c["pictures"]:
             pics_html = "".join(
-                f'<img src="{u}" loading="lazy">' for u in c["pictures"]
+                f'<img src="{_esc(u)}" loading="lazy">' for u in c["pictures"]
             )
             cls = "comment-pictures-sm" if len(c["pictures"]) > 3 else "comment-pictures"
             content_html += f'<div class="{cls}">{pics_html}</div>'
@@ -968,7 +974,7 @@ def _render_comment_section(comments: list, show_label: bool = True) -> str:
         comments_html_parts.append(f'''
         <div class="comment-item">
             <div class="comment-avatar">
-                <img src="{c["avatar"]}" alt="" onerror="this.style.display='none'">
+                <img src="{_esc(c["avatar"])}" alt="" onerror="this.style.display='none'">
             </div>
             <div class="comment-body">
                 <div class="comment-header">
@@ -1191,8 +1197,25 @@ def _parse_opus_id(raw: str):
     return None
 
 
+_SHORT_LINK_HOSTS = ("b23.tv", "bili2233.cn")
+
+
+def _is_short_link(url: str) -> bool:
+    """仅当 URL 的主机确为 B站短链域名时才视为短链，避免请求任意地址。"""
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = (parsed.hostname or "").lower()
+    return any(host == h or host.endswith("." + h) for h in _SHORT_LINK_HOSTS)
+
+
 async def _resolve_short_link(url: str) -> str:
     """解析 b23.tv 短链，返回跳转后的真实 URL"""
+    if not _is_short_link(url):
+        return url
     try:
         import aiohttp
         async with aiohttp.ClientSession() as session:
@@ -1211,7 +1234,7 @@ async def _resolve_short_link(url: str) -> str:
 
 
 async def run(target: str, keep_html: bool = False, browser_choice=None) -> None:
-    if "b23.tv" in target:
+    if _is_short_link(target):
         print("解析 b23.tv 短链...")
         target = await _resolve_short_link(target)
 
@@ -1235,7 +1258,11 @@ async def run(target: str, keep_html: bool = False, browser_choice=None) -> None
         item_id = data.bv_id
         default_title = "unknown"
 
-    await data.fetch_all()
+    try:
+        await data.fetch_all()
+    except Exception as e:
+        print(f"错误：{format_fetch_error(e, target)}")
+        return
 
     print("生成 HTML 模板...")
     html_str = await generate_html(data)
@@ -1263,7 +1290,7 @@ async def run(target: str, keep_html: bool = False, browser_choice=None) -> None
     else:
         try:
             temp_html.unlink()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"临时 HTML 删除失败（可手动清理）: {e}")
 
     print(f"简介图已保存: {output_png}")

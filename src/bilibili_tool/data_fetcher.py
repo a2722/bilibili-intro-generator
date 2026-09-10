@@ -3,15 +3,20 @@
 B站简介图生成器 — 数据获取与LLM弹幕分类模块
 """
 
+import asyncio
 import json
 import sys
-import yaml
 from typing import Optional, List
 
 try:
     from bilibili_api import video
     from bilibili_api import opus as bili_opus
     from bilibili_api import comment as bili_comment
+    from bilibili_api.exceptions import (
+        ResponseCodeException,
+        NetworkException,
+        ArgsException,
+    )
     COMMENT_RESOURCE_TYPE_VIDEO = bili_comment.CommentResourceType.VIDEO
 except ImportError:
     print("请安装: pip install bilibili-api-python")
@@ -28,6 +33,36 @@ from .bili_config import (
     LLM_CONFIG,
     DANMAKU_CATEGORY_COLORS,
 )
+from .paths import normalize_bvid
+
+_BILI_ERROR_HINTS = {
+    -404: "内容不存在或已被删除",
+    -403: "访问受限（可能需要登录，或存在地区/权限限制）",
+    -412: "请求被风控拦截，请稍后重试或配置登录 Cookie",
+    -509: "请求过于频繁，已被限流，请稍后再试",
+    62002: "内容不可见（可能审核中或被隐藏）",
+    62004: "稿件审核中，暂不可访问",
+}
+
+
+def format_fetch_error(error: Exception, target: str) -> str:
+    """把抓取过程中的异常翻译成具体、可读的错误提示。"""
+    if isinstance(error, ResponseCodeException):
+        code = getattr(error, "code", None)
+        msg = getattr(error, "msg", str(error))
+        hint = _BILI_ERROR_HINTS.get(code)
+        if hint:
+            return f"目标 {target} 获取失败：{hint}（错误码 {code}）"
+        return f"目标 {target} 获取失败：接口返回错误码 {code} - {msg}"
+    if isinstance(error, NetworkException):
+        return f"获取目标 {target} 时网络错误：状态码 {getattr(error, 'status', '?')} - {getattr(error, 'msg', str(error))}"
+    if isinstance(error, ArgsException):
+        return f"参数错误：{getattr(error, 'msg', str(error))}（目标 {target}）"
+    if isinstance(error, asyncio.TimeoutError):
+        return f"获取目标 {target} 超时：请求B站接口超时，请检查网络后重试"
+    if isinstance(error, aiohttp.ClientError):
+        return f"获取目标 {target} 时网络错误：{type(error).__name__} - {error}"
+    return f"获取目标 {target} 失败：{type(error).__name__} - {error}"
 
 
 async def classify_danmaku_llm(danmaku_texts: list, title: str, desc: str) -> dict:
@@ -40,8 +75,8 @@ async def classify_danmaku_llm(danmaku_texts: list, title: str, desc: str) -> di
 分类标准严格遵循：
 1. 玩梗/高能（橙色） — 玩网络梗、谐音梗、呼应视频名场面、高能预警。
 2. 共鸣/泪目（琥珀色） — 表达感动、心疼、陪伴感、或对UP主/角色的深情告白。
-3. 吐槽/戏谑（蓝色） — 补充背景知识、解释专业术语、指出视频中的隐藏彩蛋或细节。
-4. 硬核/科普（绿色） — 略带调侃的锐评、反驳视频观点、或揭露视频中的穿帮细节。
+3. 吐槽/戏谑（蓝色） — 略带调侃的锐评、反驳视频观点、或揭露视频中的穿帮细节。
+4. 硬核/科普（绿色） — 补充背景知识、解释专业术语、指出视频中的隐藏彩蛋或细节。
 
 【视频上下文】
 - 视频标题：{title}
@@ -101,7 +136,7 @@ class BiliIntroData:
     """B站视频数据获取"""
 
     def __init__(self, bv_id: str):
-        self.bv_id = bv_id if bv_id.startswith("BV") else f"BV{bv_id}"
+        self.bv_id = normalize_bvid(bv_id)
         self.v = video.Video(bvid=self.bv_id)
         self.info: Optional[dict] = None
         self.danmaku_list: Optional[List] = None
@@ -131,9 +166,13 @@ class BiliIntroData:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers, timeout=timeout) as resp:
                     data = await resp.json()
-                    self.fans_count = data.get("data", {}).get("follower", 0)
+                    if data.get("code") == 0:
+                        self.fans_count = (data.get("data") or {}).get("follower", 0)
+                    else:
+                        print(f"获取粉丝数失败（已降级为 0，不影响出图）: code={data.get('code')} {data.get('message', '')}")
+                        self.fans_count = 0
         except Exception as e:
-            print(f"获取粉丝数失败: {e}")
+            print(f"获取粉丝数失败（已降级为 0，不影响出图）: {e}")
             self.fans_count = 0
 
     async def _fetch_danmaku(self, limit=100):
@@ -179,22 +218,12 @@ class BiliIntroData:
         print("获取评论...")
         try:
             aid = self.info.get("aid", 0)
-            top_comments = []
-            try:
-                top_req = await bili_comment.get_comments(
-                    aid, COMMENT_RESOURCE_TYPE_VIDEO,
-                    order=bili_comment.OrderType.LIKE,
-                )
-                if top_req.get("top_replies"):
-                    top_comments = top_req["top_replies"][:1]
-            except Exception:
-                pass
-
-            hot_req = await bili_comment.get_comments(
+            req = await bili_comment.get_comments(
                 aid, COMMENT_RESOURCE_TYPE_VIDEO,
                 order=bili_comment.OrderType.LIKE,
             )
-            replies = hot_req.get("replies", [])
+            top_comments = (req.get("top_replies") or [])[:1]
+            replies = req.get("replies", [])
             top_ids = {c.get("rpid") for c in top_comments}
             replies = [r for r in replies if r.get("rpid") not in top_ids]
             self.comments = top_comments + replies[:limit - len(top_comments)]
@@ -346,9 +375,13 @@ class OpusIntroData:
             async with aiohttp.ClientSession() as session:
                 async with session.get(url, headers=headers, timeout=timeout) as resp:
                     data = await resp.json()
-                    self.fans_count = data.get("data", {}).get("follower", 0)
+                    if data.get("code") == 0:
+                        self.fans_count = (data.get("data") or {}).get("follower", 0)
+                    else:
+                        print(f"获取粉丝数失败（已降级为 0，不影响出图）: code={data.get('code')} {data.get('message', '')}")
+                        self.fans_count = 0
         except Exception as e:
-            print(f"获取粉丝数失败: {e}")
+            print(f"获取粉丝数失败（已降级为 0，不影响出图）: {e}")
             self.fans_count = 0
 
     async def _fetch_comments(self, limit=50):
@@ -368,20 +401,11 @@ class OpusIntroData:
             else:
                 rtype = bili_comment.CommentResourceType.DYNAMIC
 
-            top_comments = []
-            try:
-                top_req = await bili_comment.get_comments(
-                    rid, rtype, order=bili_comment.OrderType.LIKE,
-                )
-                if top_req.get("top_replies"):
-                    top_comments = top_req["top_replies"][:1]
-            except Exception:
-                pass
-
-            hot_req = await bili_comment.get_comments(
+            req = await bili_comment.get_comments(
                 rid, rtype, order=bili_comment.OrderType.LIKE,
             )
-            replies = hot_req.get("replies", [])
+            top_comments = (req.get("top_replies") or [])[:1]
+            replies = req.get("replies", [])
             top_ids = {c.get("rpid") for c in top_comments}
             replies = [r for r in replies if r.get("rpid") not in top_ids]
             self.comments = top_comments + replies[:limit - len(top_comments)]

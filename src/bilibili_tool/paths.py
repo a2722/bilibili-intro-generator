@@ -18,3 +18,15 @@ OUTPUT_DIR = PROJECT_ROOT / "output"
 
 # 项目自带的可执行文件
 FFMPEG_EXE = PROJECT_ROOT / "ffmpeg.exe"
+
+
+def normalize_bvid(value: str) -> str:
+    """把 BV 号统一为规范的大写 'BV' 前缀形式。
+
+    前缀大小写不敏感，支持带/不带前缀、大小写混用以及重复前缀（BVBV...）；
+    BV 号正文的大小写保持不变（正文本身区分大小写）。
+    """
+    raw = (value or "").strip()
+    while raw[:2].upper() == "BV":
+        raw = raw[2:]
+    return f"BV{raw}" if raw else ""

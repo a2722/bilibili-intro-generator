@@ -1,16 +1,17 @@
-# B站简介图生成器 + 视频下载工具 — 运行依赖
-# 安装：pip install -r requirements.txt
-# bilibili-api-python 使用 PyPI 版本即可（pip install bilibili-api-python）。
+# bilibili-intro-generator - runtime dependencies
+# Install: pip install -r requirements.txt
+# bilibili-api-python is fine from PyPI (pip install bilibili-api-python).
 
-# ---- 数据获取 ----
-bilibili-api-python>=16.0.0      # B站 API（视频/图文/评论/弹幕）
-aiohttp>=3.8.0                   # 异步 HTTP 客户端（弹幕/评论/粉丝数/下载）
-aiofiles>=22.0.0                 # 异步文件写入（视频下载）
+# ---- data fetching ----
+bilibili-api-python>=16.0.0      # Bilibili API (video / opus / comments / danmaku)
+aiohttp>=3.8.0                   # async HTTP client (danmaku / comments / fans / download)
+aiofiles>=22.0.0                 # async file writing (video download)
 
-# ---- 配置与解析 ----
-PyYAML>=6.0                      # YAML 配置解析
+# ---- config & parsing ----
+PyYAML>=6.0                      # YAML config parsing
 
-# ---- 截图渲染 ----
-playwright>=1.30.0               # 无头浏览器截图（生成简介图）
-# 说明：程序会自动优先使用系统已安装的浏览器（Edge → Chrome → Firefox → Safari），
-#       无需额外下载。仅当系统没有任何可用浏览器时才需要执行：playwright install chromium
+# ---- screenshot rendering ----
+playwright>=1.30.0               # headless browser screenshot (intro image)
+# Note: the program auto-detects a system browser (Edge -> Chrome -> Firefox -> Safari),
+#       so no extra download is needed. Only if NO browser is available, run:
+#       playwright install chromium

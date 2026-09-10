@@ -1,7 +1,5 @@
 import asyncio
-import sys
 import os
-import io
 import aiohttp
 import aiofiles
 import subprocess
@@ -9,10 +7,7 @@ import shutil
 from datetime import datetime, timedelta
 from bilibili_api import video
 
-from .paths import PROJECT_ROOT, FFMPEG_EXE
-
-if sys.stdout.encoding != 'utf-8':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+from .paths import PROJECT_ROOT, FFMPEG_EXE, normalize_bvid
 
 def setup_directories():
     """设置统一输出目录结构并清理旧文件。
@@ -88,17 +83,28 @@ def clean_old_folders(output_dir):
     except Exception as e:
         print(f"清理旧文件夹时出错: {e}")
 
+def _truncate_name(title: str, directory: str, suffix: str,
+                   max_title: int = 150, path_limit: int = 259) -> str:
+    """按“目录 + 后缀”的剩余空间截断标题，避免 Windows 260 字符路径上限。
+
+    默认给标题留 150 字符（尽量不截断故意取长标题的视频），仅当目录很深、
+    剩余空间不足时才进一步缩短，但至少保留 20 字符。
+    """
+    budget = path_limit - len(directory) - len(os.sep) - len(suffix)
+    limit = min(max_title, budget)
+    if limit < 20:
+        limit = 20
+    return title[:limit]
+
+
 async def download_video_with_audio(bv_id):
     """下载视频并合并音频"""
     try:
         # 设置目录并清理旧文件
         current_month_dir, video_dir, temp_dir = setup_directories()
         
-        # 处理BV号
-        if bv_id.startswith('BV'):
-            bv_id = bv_id[2:] if bv_id.startswith('BVBV') else bv_id
-        else:
-            bv_id = 'BV' + bv_id
+        # 处理BV号（统一为规范的大写 BV 前缀）
+        bv_id = normalize_bvid(bv_id)
             
         print(f"正在处理: {bv_id}")
         
@@ -157,8 +163,9 @@ async def download_video_with_audio(bv_id):
             print("无法获取视频链接")
             return False
         
-        # 清理文件名
+        # 清理文件名并按完整路径预算截断（上限 150 字符，避免 Windows 260 上限）
         safe_title = "".join(c for c in title if c not in r'<>:"/\|?*')
+        safe_title = _truncate_name(safe_title, temp_dir, f"_{bv_id}_video.mp4")
         
         # 临时文件放在当月 temp 子目录（合并后会删除；若失败可清理，不污染根目录）
         temp_video_filename = os.path.join(temp_dir, f"{safe_title}_{bv_id}_video.mp4")
@@ -167,12 +174,16 @@ async def download_video_with_audio(bv_id):
         # 最终输出文件放在当月 video 子目录
         final_filename = os.path.join(video_dir, f"{safe_title}_{bv_id}.mp4")
         
-        # 下载视频文件
-        await download_file(video_url, temp_video_filename, "视频")
-        
-        # 如果有单独的音频流，下载音频文件
+        # 下载视频流（失败则中止，避免后续合并空文件）
+        if not await download_file(video_url, temp_video_filename, "视频流"):
+            print("❌ 视频流下载失败，已中止（未生成最终文件）")
+            return False
+
+        # 如果有单独的音频流，下载音频流
         if audio_url:
-            await download_file(audio_url, temp_audio_filename, "音频")
+            if not await download_file(audio_url, temp_audio_filename, "音频流"):
+                print("❌ 音频流下载失败，已中止（视频临时文件保留在 temp 子目录）")
+                return False
         
         # 合并视频和音频（如果需要）
         if audio_url:
@@ -203,33 +214,50 @@ async def download_video_with_audio(bv_id):
         return False
 
 async def download_file(url, filename, file_type):
-    """下载文件"""
+    """下载文件，返回是否成功；失败时清理残留的分片文件。"""
     print(f"开始下载{file_type}...")
-    
-    async with aiohttp.ClientSession() as session:
-        headers = {
-            "Referer": "https://www.bilibili.com/",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        }
-        
-        async with session.get(url, headers=headers) as response:
-            if response.status == 200:
-                total_size = int(response.headers.get('content-length', 0))
-                downloaded = 0
-                
-                async with aiofiles.open(filename, 'wb') as f:
-                    async for chunk in response.content.iter_chunked(8192):
-                        await f.write(chunk)
-                        downloaded += len(chunk)
-                        if total_size > 0:
-                            percent = (downloaded / total_size) * 100
-                            print(f"\r{file_type}下载进度: {percent:.1f}%", end='', flush=True)
-                
-                print(f"\n{file_type}下载完成")
-                return True
-            else:
-                print(f"❌ {file_type}下载失败，HTTP状态码: {response.status}")
-                return False
+    success = False
+    try:
+        async with aiohttp.ClientSession() as session:
+            headers = {
+                "Referer": "https://www.bilibili.com/",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            }
+
+            async with session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    total_size = int(response.headers.get('content-length', 0))
+                    downloaded = 0
+
+                    async with aiofiles.open(filename, 'wb') as f:
+                        async for chunk in response.content.iter_chunked(8192):
+                            await f.write(chunk)
+                            downloaded += len(chunk)
+                            if total_size > 0:
+                                percent = (downloaded / total_size) * 100
+                                print(f"\r{file_type}下载进度: {percent:.1f}%", end='', flush=True)
+
+                    print(f"\n{file_type}下载完成")
+                    success = True
+                    return True
+                else:
+                    print(f"❌ {file_type}下载失败，HTTP状态码: {response.status}")
+                    return False
+    except asyncio.TimeoutError:
+        print(f"\n❌ {file_type}下载超时（网络中断或链接过期）")
+        return False
+    except aiohttp.ClientError as e:
+        print(f"\n❌ {file_type}下载网络错误: {e}")
+        return False
+    except Exception as e:
+        print(f"\n❌ {file_type}下载出错: {e}")
+        return False
+    finally:
+        if not success and os.path.exists(filename):
+            try:
+                os.remove(filename)
+            except Exception:
+                print(f"残留临时文件删除失败（可手动清理）: {filename}")
 
 async def merge_video_audio(video_file, audio_file, output_file):
     """使用ffmpeg合并视频和音频"""
