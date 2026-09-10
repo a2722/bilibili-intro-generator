@@ -7,7 +7,10 @@
 # 不填 api_key 时跳过 AI 分类，简介图仍正常生成（弹幕使用关键词规则着色）。
 llm:
   provider: deepseek
+  # 方式一：直接填明文（请把本文件复制为 config.yml 后再填，config.yml 已被 gitignore）
   api_key: ""  # 留空则跳过 AI 弹幕分类（简介图仍正常生成）
+  # 方式二：从环境变量读取（优先级高于 api_key），变量名可自定义
+  api_key_env: "BILI_INTRO_API_KEY"
   base_url: "https://api.deepseek.com"
   model: "deepseek-chat"
 

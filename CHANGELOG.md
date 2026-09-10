@@ -2,6 +2,15 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。更新日志格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [0.2.2] - 2026-09-10
+
+### 新增
+- 支持从环境变量读取 LLM API Key：新增 `llm.api_key_env` 配置项（默认 `BILI_INTRO_API_KEY`，变量名可自定义），取值优先级为「环境变量 > config.yml 明文」；占位符 / 纯空白仍视为未配置
+- README 新增「API Key 的两种填法」章节（明文 / 环境变量，含 Linux、macOS、Windows PowerShell 设置示例）
+
+### 变更
+- `.gitignore` 忽略本地 `backup/` 目录，避免完整目录备份被误提交
+
 ## [0.2.1] - 2026-09-10
 
 ### 修复

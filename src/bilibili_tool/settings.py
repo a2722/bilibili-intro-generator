@@ -2,7 +2,7 @@
 """统一配置中心：所有配置合并到项目根的 config.yml（模板见 config.example.yml）。
 
 分区:
-  llm            — 弹幕 AI 分类（可选，不填 api_key 则跳过）
+  llm            — 弹幕 AI 分类（可选；key 可来自明文或 api_key_env 指定的环境变量）
   danmaku_filter — 弹幕过滤词
   detector       — 下载难度检测阈值
 
@@ -10,8 +10,10 @@ config.yml 不存在时会自动用内置默认值创建一份带注释的模板
 各分区支持只写需要覆盖的项，其余项自动回落到默认值（递归合并）。
 """
 
-import yaml
+import os
 from copy import deepcopy
+
+import yaml
 
 from .paths import PROJECT_ROOT
 
@@ -29,6 +31,7 @@ DEFAULTS = {
     "llm": {
         "provider": "deepseek",
         "api_key": "",
+        "api_key_env": "BILI_INTRO_API_KEY",  # 环境变量名（优先级高于 api_key，可在 config 中改）
         "base_url": "https://api.deepseek.com",
         "model": "deepseek-chat",
     },
@@ -60,7 +63,10 @@ _TEMPLATE = """# ==================== bilibili-intro-generator 统一配置 ====
 # 不填 api_key 时跳过 AI 分类，简介图仍正常生成（弹幕使用关键词规则着色）。
 llm:
   provider: deepseek
+  # 方式一：直接填明文（本文件已被 gitignore，不会提交）
   api_key: ""  # 留空则跳过 AI 弹幕分类（简介图仍正常生成）
+  # 方式二：从环境变量读取（优先级高于 api_key），变量名在这里自定义
+  api_key_env: "BILI_INTRO_API_KEY"
   base_url: "https://api.deepseek.com"
   model: "deepseek-chat"
 
@@ -108,6 +114,24 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return merged
 
 
+def _resolve_llm_api_key(llm: dict) -> None:
+    """确定最终的 llm.api_key（就地写回 llm 字典）。
+
+    优先级：环境变量（变量名由 llm.api_key_env 指定） > config.yml 的 llm.api_key。
+    占位符 / 纯空白一律视为未配置，避免误触发 LLM 请求。
+    """
+    key = (llm.get("api_key") or "").strip()
+    key = "" if key in _API_KEY_PLACEHOLDERS else key
+
+    env_name = (llm.get("api_key_env") or "").strip()
+    if env_name:
+        env_value = (os.environ.get(env_name) or "").strip()
+        if env_value:
+            key = env_value
+
+    llm["api_key"] = key
+
+
 def load_config() -> dict:
     """加载 config.yml 并与内置默认值合并；文件不存在时自动创建模板。"""
     if not CONFIG_FILE.exists():
@@ -116,24 +140,22 @@ def load_config() -> dict:
             print(f"已创建默认配置文件: {CONFIG_FILE}")
         except Exception as e:
             print(f"创建配置文件失败: {e}")
-        return deepcopy(DEFAULTS)
-
-    try:
-        user_cfg = yaml.safe_load(CONFIG_FILE.read_text(encoding="utf-8")) or {}
-    except Exception as e:
-        print(f"配置文件加载失败，使用默认配置: {e}")
-        return deepcopy(DEFAULTS)
+        user_cfg = {}
+    else:
+        try:
+            user_cfg = yaml.safe_load(CONFIG_FILE.read_text(encoding="utf-8")) or {}
+        except Exception as e:
+            print(f"配置文件加载失败，使用默认配置: {e}")
+            user_cfg = {}
 
     merged = deepcopy(DEFAULTS)
     for section in DEFAULTS:
         if isinstance(user_cfg.get(section), dict):
             merged[section] = _deep_merge(DEFAULTS[section], user_cfg[section])
 
-    # 占位符 / 纯空白一律视为未配置，避免误触发 LLM 请求
     llm = merged.get("llm")
     if isinstance(llm, dict):
-        key = (llm.get("api_key") or "").strip()
-        llm["api_key"] = "" if key in _API_KEY_PLACEHOLDERS else key
+        _resolve_llm_api_key(llm)
 
     return merged
 

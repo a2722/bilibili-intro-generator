@@ -85,6 +85,29 @@ python main.py download BV1GJ411x7h7
 | `danmaku_filter` | 弹幕过滤规则（精确匹配 / 包含子串） |
 | `detector` | 下载难度阈值（最大时长 / 分P数 / 难度分数） |
 
+### API Key 的两种填法
+
+`llm.api_key` 支持两种来源，**环境变量优先**（默认变量名 `BILI_INTRO_API_KEY`，可自定义）：
+
+```yaml
+llm:
+  api_key: ""                       # 方式一：直接填明文（config.yml 已被 gitignore）
+  api_key_env: "BILI_INTRO_API_KEY"  # 方式二：从该环境变量读取，名称随便改
+```
+
+```bash
+# Linux / macOS
+export BILI_INTRO_API_KEY="sk-你的key"
+
+# Windows PowerShell（仅当前会话）
+$env:BILI_INTRO_API_KEY = "sk-你的key"
+
+# Windows PowerShell（用户级永久，设置后需重开终端）
+[Environment]::SetEnvironmentVariable('BILI_INTRO_API_KEY','sk-你的key','User')
+```
+
+> 推荐用环境变量：key 不在任何文件里，项目被复制 / 备份 / 误提交都不会带走它。
+
 ## 输出
 
 所有产物统一归档到 `output/yyyyMM/`（按月分文件夹）：
