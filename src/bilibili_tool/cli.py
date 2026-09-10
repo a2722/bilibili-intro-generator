@@ -21,6 +21,8 @@ def _build_parser() -> argparse.ArgumentParser:
                          help="保留临时 HTML 文件")
     p_intro.add_argument("--browser", "-b", default=None,
                          help="指定渲染浏览器 (chromium / edge / chrome / firefox / webkit)")
+    p_intro.add_argument("--video", "-v", action="store_true",
+                         help="生成简介图后同时下载视频")
 
     p_dl = sub.add_parser(
         "download", help="下载B站视频（下载前进行时长/分P难度检测）"
@@ -41,6 +43,10 @@ def main() -> None:
         from .intro_generator import run as run_intro
         asyncio.run(run_intro(args.target, keep_html=args.keep_html,
                               browser_choice=args.browser))
+        if args.video:
+            from .wrapper import run as run_download
+            ok = asyncio.run(run_download(args.target))
+            sys.exit(0 if ok else 1)
     elif args.command == "download":
         from .wrapper import run as run_download
         ok = asyncio.run(run_download(args.bv_id))
